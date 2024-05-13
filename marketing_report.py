@@ -450,21 +450,6 @@ class MainWindow(QMainWindow):
         self.autocompletion_thread.result.connect(self.update_completer)
         self.autocompletion_thread.start()
 
-    def handle_insertion_result(self, success, message):
-        if success:
-            QMessageBox.information(self, "Success", message)
-        else:
-            QMessageBox.critical(self, "Error", message)
-
-    def process_data_insertion(self, table_name, id_text, name_text, text_text, link_text):
-        current_datetime = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        query = f"INSERT INTO {table_name} (id, name, text, link, datetime) VALUES ('{id_text}', '{name_text}', '{text_text}', '{link_text}', '{current_datetime}')"
-        self.mysql_connector.execute_query(query)
-        data = [id_text, name_text, text_text, link_text, current_datetime]
-        google_sheets_thread = GoogleSheetConnector(self.google_sheet_connector, data, table_name)
-        google_sheets_thread.insertion_complete.connect(self.handle_insertion_result)
-        google_sheets_thread.start()
-
     def update_completer(self, autocompletion_data):
         input_fields = self.frames[0].findChildren(QLineEdit)
         for index, data in enumerate(autocompletion_data):
