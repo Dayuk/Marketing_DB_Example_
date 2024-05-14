@@ -7,5 +7,4 @@ DB_HOST = '127.0.0.1'
 DB_USER = 'Program_User'
 DB_PASSWORD = 'rlaqjatn256^'
 DB_DATABASE = 'my_database'
-FONT_SIZE = 16
 FONT_PATH = "NotoSansKR-Medium.ttf"
