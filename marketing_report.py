@@ -1,249 +1,128 @@
-from pickle import NONE
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QGridLayout, QStackedWidget, QMainWindow, QSpacerItem, QSizePolicy, QTextBrowser, QTableWidgetItem, QTabWidget
+from PyQt5.QtCore import Qt, QPoint, QThread, pyqtSignal
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QVBoxLayout, QHBoxLayout, QFrame, QLabel, QGridLayout, \
-    QMessageBox, QStackedWidget, QMainWindow, QSpacerItem, QSizePolicy, QCompleter, QLineEdit
-from PyQt5.QtGui import QFont, QFontDatabase
-from PyQt5.QtCore import Qt, QPoint, QThread, pyqtSignal, QObject
+from uu import Error
 import pymysql
 from functools import partial
 import time
 from datetime import datetime
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-import logging
-from settings import MAX_ROWS, MAX_COLS, CREDENTIALS_FILE, SPREADSHEET_NAME, DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE, \
-    FONT_PATH
 import bcrypt
+import re
+#.py file import
+from settings import CREDENTIALS_FILE, SPREADSHEET_NAME, DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE
+from sheets_connector import GoogleSheetConnector
+from ui_components import FontManager, CustomButtonWithStyle, StyledLineEdit, StyledLabel, StyledTableWidget, StyledComboBox, StyledMessageBox, StyledCompleter
+from database_manager import MySQLConnector
 
-
-class FontManager:
-    def __init__(self, font_file=FONT_PATH, font_size=10):
-        self.font_file = font_file
-        self.font_size = font_size
-        self.font_id = QFontDatabase.addApplicationFont(self.font_file)
-        self.font_family = QFontDatabase.applicationFontFamilies(self.font_id)[0]
-
-    def get_font(self):
-        return QFont(self.font_family, self.font_size)
-
-
-class CustomButtonWithStyle(QPushButton):
-    def __init__(self, text, parent=None):
-        super(CustomButtonWithStyle, self).__init__(text, parent)
-        self.init_ui()
-
-    def init_ui(self):
-        # 폰트 설정
-        font_manager = FontManager(font_size=16)
-        self.setFont(font_manager.get_font())
-
-        # 버튼 스타일 설정
-        self.setStyleSheet(self.get_style())
-
-    @staticmethod
-    def get_style():
-        # 버튼 및 타이틀 바 스타일 정의
-        return """
-            QPushButton {
-                background-color: #292929;
-                color: white;
-                border: 2px solid white;
-                border-radius: 8px;
-                padding: 10px 24px;
-                font-size: 16px;
-            }
-            QPushButton:hover {
-                background-color: white;
-                color: #292929;
-                border: 2px solid #292929;
-            }
-            QPushButton:disabled {
-                background-color: white;
-                color: #292929;
-                border: 2px solid #292929;
-            }
-            QPushButton#MinimizeButton, QPushButton#CloseButton {
-                background-color: #292929;
-                color: white;
-                border: 2px solid white;
-                border-radius: 8px;
-                padding: 0px;
-                font-size: 12px;
-            }
-            QPushButton#MinimizeButton:hover, QPushButton#CloseButton:hover {
-                background-color: white;
-                color: #292929;
-            }
-            QPushButton#MinimizeButton:disabled, QPushButton#CloseButton:disabled {
-                background-color: white;
-                color: #292929;
-            }
-        """
-
-
-class StyledLineEdit(QLineEdit):
-    def __init__(self, parent=None, placeholderText=None, echoMode=None):
-        super(StyledLineEdit, self).__init__(parent)
-
-        # 폰트 설정
-        font_manager = FontManager(font_size=10)
-        self.setFont(font_manager.get_font())
-
-        # 스타일 설정
-        self.setStyleSheet("""
-            border: 2px solid white;
-            border-radius: 2px;
-        """)
-
-        if placeholderText:
-            self.setPlaceholderText(placeholderText)
-
-        if echoMode:
-            self.setEchoMode(echoMode)
-
-
-class StyledLabel(QLabel):
-    def __init__(self, text, parent=None):
-        super(StyledLabel, self).__init__(text, parent)
-        self.init_ui()
-
-    def init_ui(self):
-        # 폰트 설정
-        font_manager = FontManager(font_size=10)
-        self.setFont(font_manager.get_font())
-
-        # 스타일 설정
-        self.setStyleSheet("""
-        """)
-
-
-class MySQLConnector:
-    def __init__(self, host, user, password, database):
-        self.host = host
-        self.user = user
-        self.password = password
-        self.database = database
-        self.connection = None
-
-    def connect(self):
-        try:
-            self.connection = pymysql.connect(
-                host=self.host,
-                user=self.user,
-                password=self.password,
-                database=self.database
-            )
-        except pymysql.Error as e:
-            logging.error("MySQL 데이터베이스 연결 오류: %s", e)
-            raise ConnectionError("데이터베이스 연결에 실패했습니다.") from e
-
-    def disconnect(self):
-        if self.connection and self.connection.open:
-            self.connection.close()
-
-    def execute_query(self, query, data=None):
-        if not self.connection:
-            raise Exception("데이터베이스 연결이 없습니다.")
-        try:
-            with self.connection.cursor() as cursor:
-                if data:
-                    cursor.execute(query, data)
-                else:
-                    cursor.execute(query)
-                result = cursor.fetchall()
-                self.connection.commit()
-                return result
-        except pymysql.Error as e:
-            self.connection.rollback()
-            logging.error("쿼리 실행 오류: %s", e)
-            raise Exception("쿼리 실행 실패") from e
-
-
-class GoogleSheetConnector:
-    def __init__(self, credentials_file, spreadsheet_name):
-        self.credentials_file = credentials_file
-        self.spreadsheet_name = spreadsheet_name
-
-    def insert_data(self, data, table_name):
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        credentials = ServiceAccountCredentials.from_json_keyfile_name(self.credentials_file, scope)
-        gc = gspread.authorize(credentials)
-        spreadsheet = gc.open(self.spreadsheet_name)
-        sheet_name = table_name
-        try:
-            self.sheet = spreadsheet.worksheet(sheet_name)
-        except gspread.exceptions.WorksheetNotFound:
-            # sheet가 존재하지 않을때 sheet 생성
-            self.sheet = spreadsheet.add_worksheet(title=sheet_name, rows=MAX_ROWS, cols=MAX_COLS)
-            headers = ["id", "name", "text", "link", "datetime"]
-            self.sheet.insert_row(headers, index=1)
-
-            # 1행 고정
-            self.sheet.freeze(rows=1)
-
-        # 데이터 입력
-        self.sheet.append_row(data)
-
-
-class CheckTextFieldExistence(QObject):
-    table_existence_checked = pyqtSignal(bool)
-
-    def __init__(self, mysql_connector, table_name, id_text_field, name_text_field):
-        super().__init__()
-        self.mysql_connector = mysql_connector
-        self.table_name = table_name
-        self.id_text_field = id_text_field
-        self.name_text_field = name_text_field
-
-    def check_fields_existence(self):
-        # 테이블이 존재하는지 확인
-        self.mysql_connector.connect()
-        try:
-            query = "SHOW TABLES LIKE %s"
-            result = self.mysql_connector.execute_query(query, (self.table_name,))
-            table_exists = bool(result)
-            if not table_exists:
-                self.table_existence_checked.emit(False)
-                return
-
-            id_value = self.id_text_field.text()
-            name_value = self.name_text_field.text()
-
-            id_query = "SELECT COUNT(*) FROM 분류 WHERE name = %s"
-            id_exists = self.mysql_connector.execute_query(id_query, (id_value,))[0][0] > 0
-
-            name_query = "SELECT COUNT(*) FROM 작업자 WHERE name = %s"
-            name_exists = self.mysql_connector.execute_query(name_query, (name_value,))[0][0] > 0
-
-            self.table_existence_checked.emit(id_exists and name_exists)
-        finally:
-            self.mysql_connector.disconnect()
-
-
-class Input_Button_Clicked(CustomButtonWithStyle):
-    def __init__(self, main_window, autocompletion_input_field, id_text_field, name_text_field, longtext_text_field,
-                 link_text_field, parent=None):
-        super(Input_Button_Clicked, self).__init__("Insert Data", parent)
+class InputButtonClicked(CustomButtonWithStyle):
+    def __init__(self, main_window, autocompletion_input_field, id_text_field, name_text_field, longtext_text_field, link_text_field, parent=None):
+        super(InputButtonClicked, self).__init__("Insert Data", parent)
         self.main_window = main_window
         self.autocompletion_input_field = autocompletion_input_field
         self.id_text_field = id_text_field
         self.name_text_field = name_text_field
         self.longtext_text_field = longtext_text_field
         self.link_text_field = link_text_field
-        self.clicked.connect(self.check_table_existence)
+        self.thread = None
+        self.is_thread_running = False
+        self.clicked.connect(self.start_thread)
+
+    def start_thread(self):
+        if self.is_thread_running:
+            self.main_window.log_browser.append("이전 작업이 아직 완료되지 않았습니다. 잠시 후 다시 시도해주세요.")
+            return
+        # 입력 데이터 검증
+        self.table_name = self.autocompletion_input_field.text().strip()
+        self.id_name = self.id_text_field.text().strip()
+        if not self.table_name or not self.id_name:
+            self.main_window.log_browser.append("입력 오류: 모든 데이터를 입력해주세요.")
+            return
+        if len(self.table_name) > 50 or len(self.id_name) > 50:
+            self.main_window.log_browser.append("입력 오류: 이름이 너무 깁니다. 50자 이내로 입력해주세요.")
+            return
+        # 스레드 생성 및 설정
+        try:
+            self.thread = Worker(self.main_window, self.autocompletion_input_field, self.id_text_field, self.name_text_field, self.longtext_text_field, self.link_text_field)
+        except:
+            self.main_window.log_browser.append("입력 오류: 데이터를 입력해주세요.")
+            return
+        # 시그널 연결
+        self.thread.table_existence_checked.connect(self.handle_table_existence_checked)
+        self.thread.result.connect(self.main_window.log_browser.append)  # result 시그널을 로그 브라우저에 연결
+        self.thread.finished.connect(self.on_thread_finished)  # 작업 완료 시 중간 메서드 호출
+
+        # 스레드 시작
+        self.thread.start()
+
+    def on_thread_finished(self):
+        # 스레드가 완전히 종료된 후에 상태 업데이트
+        self.is_thread_running = False
+        if self.thread.isRunning():
+            self.thread.wait()  # 스레드가 완전히 종료될 때까지 기다림
+        self.thread.deleteLater()  # 스레드 객체 삭제
+        self.main_window.log_browser.append("작업이 완료되었습니다.")
+
+    def handle_table_existence_checked(self, exists):
+        if not exists:
+            self.main_window.log_browser.append("타겟이 존재하지 않습니다.")
+        else:
+            self.main_window.log_browser.append("데이터를 삽입 하는 중 입니다.")
+
+class Worker(QThread):
+    finished = pyqtSignal()  # 작업 완료 시그널
+    result = pyqtSignal(str)  # 처리 결과를 전달하는 시그널
+    table_existence_checked = pyqtSignal(bool)  # 테이블 존재 여부를 전달하는 시그널
+
+
+    def __init__(self, main_window, autocompletion_input_field, id_text_field, name_text_field, longtext_text_field, link_text_field):
+        super().__init__()
+        self.main_window = main_window
+        self.autocompletion_input_field = autocompletion_input_field
+        self.id_text_field = id_text_field
+        self.name_text_field = name_text_field
+        self.longtext_text_field = longtext_text_field
+        self.link_text_field = link_text_field
+
+    def run(self):
+        self.check_table_existence()
 
     def check_table_existence(self):
-        self.table_name = self.autocompletion_input_field.text()
-        checker = CheckTextFieldExistence(self.main_window.mysql_connector, self.table_name, self.id_text_field,
-                                          self.name_text_field)
-        checker.table_existence_checked.connect(self.handle_table_existence_checked)
-        checker.check_fields_existence()
+        self.table_name = self.autocompletion_input_field.text().strip()
+        
+        # 데이터베이스 연결 및 테이블 존재 확인
+        self.main_window.mysql_connector.connect()
+        try:
+            query = "SHOW TABLES LIKE %s"
+            result = self.main_window.mysql_connector.execute_query(query, (self.table_name,))
+            table_exists = bool(result)
+            if not table_exists:
+                self.main_window.log_browser.append("Target Not Found: 타겟이 존재하지 않습니다.")
+                return
 
-    def handle_table_existence_checked(self, table_exists):
-        if not table_exists:
-            QMessageBox.warning(self.main_window, "Table Not Found", "테이블이 존재하지 않습니다.")
-            return
+            # ID와 이름 필드 검증
+            id_value = self.id_text_field.text().strip()
+            name_value = self.name_text_field.text().strip()
+            if not id_value or not name_value:
+                self.main_window.log_browser.append("입력 오류: ID와 이름을 모두 입력해주세요.")
+                return
+            if len(id_value) > 30 or len(name_value) > 30:
+                self.main_window.log_browser.append("입력 오류: ID와 이름은 각각 30자 이내로 입력해주세요.")
+                return
 
+            id_query = "SELECT COUNT(*) FROM 분류 WHERE name = %s"
+            id_exists = self.main_window.mysql_connector.execute_query(id_query, (id_value,))[0][0] > 0
+
+            name_query = "SELECT COUNT(*) FROM 작업자 WHERE name = %s"
+            name_exists = self.main_window.mysql_connector.execute_query(name_query, (name_value,))[0][0] > 0
+            self.table_existence_checked.emit(id_exists and name_exists)
+            self.handle_table_existence_checked()
+        except Error as E:
+            error_message = f"데이터베이스 오류 발생: {E}"
+            self.main_window.log_browser.append(error_message)
+        finally:
+            self.main_window.mysql_connector.disconnect()
+
+    def handle_table_existence_checked(self):
         data = [
             self.id_text_field.text(),
             self.name_text_field.text(),
@@ -272,14 +151,51 @@ class Input_Button_Clicked(CustomButtonWithStyle):
             INSERT INTO {self.table_name} (id, name, text, link, datetime) 
             VALUES (%s, %s, %s, %s, %s)
             """
-            data = (
-            self.id_text, self.name_text_field.text(), self.longtext_text_field.text(), self.link_text_field.text(),
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            data = (self.id_text, self.name_text_field.text(), self.longtext_text_field.text(), self.link_text_field.text(), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             self.main_window.mysql_connector.execute_query(query, data)
         finally:
             # 데이터베이스 연결 닫기
             self.main_window.mysql_connector.disconnect()
+            self.finished.emit()  # 작업 완료 시그널 발생
 
+class WorkerManager:
+    def __init__(self, connector):
+        self.connector = connector
+
+    def insert_category_data(self, id, name):
+        self.connector.connect()
+        cursor = self.connector.connection.cursor()
+        try:
+            cursor.execute("INSERT INTO 분류 (id, name) VALUES (%s, %s)", (id, name))
+            self.connector.connection.commit()
+        except pymysql.Error as e:
+            raise Exception("Failed to insert data: " + str(e))
+        finally:
+            self.connector.disconnect()
+
+    def load_category_data(self):
+        self.connector.connect()
+        cursor = self.connector.connection.cursor()
+        cursor.execute("SELECT id, name FROM 분류")
+        results = cursor.fetchall()
+        self.connector.disconnect()
+        return results
+
+    def load_workers(self):
+        self.connector.connect()
+        cursor = self.connector.connection.cursor()
+        cursor.execute("SELECT id, name, authority FROM 작업자")
+        return cursor.fetchall()
+
+    def update_worker_authority(self, worker_id, new_authority):
+        self.connector.connect()
+        try:
+            with self.connector.connection.cursor() as cursor:
+                update_query = "UPDATE 작업자 SET authority = %s WHERE id = %s"
+                cursor.execute(update_query, (new_authority, worker_id))
+                self.connector.connection.commit()
+        finally:
+            self.connector.disconnect()
 
 class AutocompletionThread(QThread):
     result = pyqtSignal(list)
@@ -320,8 +236,7 @@ class AutocompletionThread(QThread):
                 time.sleep(30)
 
         except Exception as e:
-            logging.error("Error: %s", e)
-
+            self.main_window.log_browser.append(f"Error: {e}")
 
 class FrameWithBar(QFrame):
     def __init__(self, main_window, parent=None):
@@ -355,7 +270,6 @@ class FrameWithBar(QFrame):
 
         self.setStyleSheet(CustomButtonWithStyle.get_style())
 
-
 class LoginFrame(QFrame):
     def __init__(self, main_window, parent=None):
         super(LoginFrame, self).__init__(parent)
@@ -373,6 +287,7 @@ class LoginFrame(QFrame):
         # 로그인 폼을 위한 그리드 레이아웃
         grid_layout = QGridLayout()
         main_layout.addLayout(grid_layout)
+
 
         # 레이블과 입력 필드를 튜플 리스트로 정의
         fields = [
@@ -420,22 +335,28 @@ class LoginFrame(QFrame):
 
         try:
             # 사용자 이름과 비밀번호가 일치하는지 확인하는 쿼리 실행
-            query = "SELECT pw FROM 작업자 WHERE id = %s"
+            query = "SELECT pw, name, authority FROM 작업자 WHERE id = %s"
             cursor = self.main_window.mysql_connector.connection.cursor()
             cursor.execute(query, (username,))
             result = cursor.fetchone()
             if result:
                 # 데이터베이스에서 가져온 해시된 비밀번호와 입력된 비밀번호 비교
-                hashed_password = result[0]
+                hashed_password, name, authority = result
                 if bcrypt.checkpw(password.encode('utf-8'), hashed_password.encode('utf-8')):
-                    QMessageBox.information(self, "로그인 성공", "로그인에 성공했습니다.")
-                    self.main_window.switch_to_UI_Frame(2)  # 로그인 성공 시 UI 프레임 전환
+                    if authority == 0:
+                        StyledMessageBox(self, "로그인 실패", "승인되지 않은 계정입니다.")
+                    else:
+                        self.main_window.current_user_authority = authority  # 사용자 권한 업데이트
+                        self.main_window.switch_to_UI_Frame(2)  # 로그인 성공 시 UI 프레임 전환
+                        self.main_window.update_buttons_state(0)
+                        # 로그인 성공 후 MainWindow의 name_text 위젯 업데이트
+                        self.main_window.set_name_text(name)
                 else:
-                    QMessageBox.warning(self, "로그인 실패", "잘못된 비밀번호입니다.")
+                    StyledMessageBox(self, "로그인 실패", "로그인 정보가 잘못되었습니다.")
             else:
-                QMessageBox.warning(self, "로그인 실패", "존재하지 않는 사용자입니다.")
+                StyledMessageBox(self, "로그인 실패", "로그인 정보가 잘못되었습니다.")
         except pymysql.Error as e:
-            QMessageBox.warning(self, "로그인 실패", f"데이터베이스 오류: {e}")
+            StyledMessageBox(self, "로그인 실패", "데이터베이스 오류")
         finally:
             # 데이터베이스 연결 해제
             self.main_window.mysql_connector.disconnect()
@@ -443,7 +364,6 @@ class LoginFrame(QFrame):
     def handle_register(self):
         # 계정 추가 프레임 전환
         self.main_window.switch_to_UI_Frame(1)
-
 
 class RegisterFrame(QFrame):
     def __init__(self, main_window, parent=None):
@@ -493,8 +413,25 @@ class RegisterFrame(QFrame):
     def create_account(self):
         # 입력 필드에서 사용자 이름, ID, 비밀번호 가져오기
         name = self.findChild(StyledLineEdit, "이름_field").text()
-        user_id = self.findChild(StyledLineEdit, "ID_field").text()
+        user_id = self.findChild(StyledLineEdit, "ID_field").text().lower()  # 대문자를 소문자로 변환
         password = self.findChild(StyledLineEdit, "PW_field").text()
+
+        # 모든 필드가 채워졌는지 확인
+        if not name or not user_id or not password:
+            StyledMessageBox(self, "계정 생성 실패", "모든 정보를 입력해주세요.")
+            return
+
+        # 이름 길이 제한 및 한국어 여부 확인
+        if len(name) > 5:
+            StyledMessageBox(self, "계정 생성 실패", "이름은 5자 이내로 입력해주세요.")
+            return
+        if not re.match("^[가-힣]+$", name):
+            StyledMessageBox(self, "계정 생성 실패", "이름은 한국어로만 입력해주세요.")
+            return
+        # user_id 유효성 검사 (소문자 영문자와 숫자만 허용)
+        if not re.match("^[a-z0-9]+$", user_id):
+            StyledMessageBox(self, "계정 생성 실패", "ID는 영어와 숫자만 사용할 수 있습니다.")
+            return
 
         # 비밀번호를 바이트로 인코딩하고 bcrypt로 해싱
         password_bytes = password.encode('utf-8')
@@ -506,14 +443,14 @@ class RegisterFrame(QFrame):
         try:
             with self.main_window.mysql_connector.connection.cursor() as cursor:
                 # 사용자 계정을 생성하는 SQL 쿼리
-                sql = "INSERT INTO 작업자 (name, id, pw) VALUES (%s, %s, %s)"
+                sql = "INSERT INTO 작업자 (name, id, pw, authority) VALUES (%s, %s, %s, %s)"
                 # 실행
-                cursor.execute(sql, (name, user_id, hashed_password))
+                cursor.execute(sql, (name, user_id, hashed_password, 0))
                 # 변경사항 저장
                 self.main_window.mysql_connector.connection.commit()
-                QMessageBox.information(self, "계정 생성 성공", "새로운 계정이 성공적으로 생성되었습니다.")
+                StyledMessageBox(self, "계정 생성 성공", "새로운 계정이 성공적으로 생성되었습니다.\n관리자에게 승인을 요청해주세요.")
         except pymysql.Error as e:
-            QMessageBox.warning(self, "계정 생성 실패", f"데이터베이스 오류: {e}")
+            StyledMessageBox(self, "계정 생성 실패", "데이터베이스 오류")
         finally:
             # 데이터베이스 연결 해제
             self.main_window.mysql_connector.disconnect()
@@ -524,11 +461,129 @@ class RegisterFrame(QFrame):
         self.findChild(StyledLineEdit, "ID_field").clear()
         self.findChild(StyledLineEdit, "PW_field").clear()
 
+class WorkerFrame(QFrame):
+    def __init__(self, parent, worker_manager):
+        super(WorkerFrame, self).__init__(parent)
+        self.worker_manager = worker_manager
+        self.font_manager = FontManager(font_size=10)
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        frame_with_bar = FrameWithBar(self)
+        layout.addWidget(frame_with_bar)
+        self.tab_widget = QTabWidget()  # 탭 위젯 생성
+        layout.addWidget(self.tab_widget)
+
+        # 기존 Worker 관리 탭
+        self.manage_workers_tab = QWidget()
+        self.tab_widget.addTab(self.manage_workers_tab, "Workers Management")
+        self.setup_workers_tab()
+
+        # 분류 테이블 데이터 탭
+        self.category_tab = QWidget()
+        self.tab_widget.addTab(self.category_tab, "Category Data")
+        self.setup_category_tab()
+
+    def setup_workers_tab(self):
+        layout = QVBoxLayout(self.manage_workers_tab)
+        self.worker_table = StyledTableWidget(0, 3)
+        self.worker_table.setHorizontalHeaderLabels(["ID", "Name", "Authority"])
+        layout.addWidget(self.worker_table)
+        self.authority_combo = StyledComboBox()
+        self.authority_combo.addItems(["미승인", "Admin", "승인"])
+        update_button = CustomButtonWithStyle("권한 업데이트")
+        update_button.clicked.connect(self.update_authority)
+
+        update_layout = QHBoxLayout()
+        update_layout.addWidget(StyledLabel("설정 권한:"))
+        update_layout.addWidget(self.authority_combo)
+        update_layout.addWidget(update_button)
+        layout.addLayout(update_layout)
+
+        self.load_workers()
+
+    def setup_category_tab(self):
+        layout = QVBoxLayout(self.category_tab)
+        self.category_table = StyledTableWidget(0, 2)  # 2열(id, name) 테이블
+        self.category_table.setHorizontalHeaderLabels(["ID", "Name"])
+        layout.addWidget(self.category_table)
+
+        input_layout = QHBoxLayout()
+        self.id_input = StyledLineEdit(self, placeholderText="Enter ID")
+        self.name_input = StyledLineEdit(self, placeholderText="Enter Name")
+        input_layout.addWidget(StyledLabel("ID:"))
+        input_layout.addWidget(self.id_input)
+        input_layout.addWidget(StyledLabel("Name:"))
+        input_layout.addWidget(self.name_input)
+        # 행 추가 버튼
+        add_row_button = CustomButtonWithStyle("Add Row")
+        add_row_button.clicked.connect(self.add_row_to_category_table)
+
+        layout.addLayout(input_layout)
+
+        layout.addWidget(add_row_button)
+
+        self.load_category_data()
+
+    def load_category_data(self):
+        results = self.worker_manager.load_category_data()  # 분류 데이터 로드
+        self.category_table.setRowCount(0)
+        for row_number, row_data in enumerate(results):
+            self.category_table.insertRow(row_number)
+            for column_number, data in enumerate(row_data):
+                self.category_table.setItem(row_number, column_number, QTableWidgetItem(str(data)))
+
+    def add_row_to_category_table(self):
+        id_text = self.id_input.text()
+        name_text = self.name_input.text()
+
+        # 입력 검증
+        if not id_text or not name_text:
+            StyledMessageBox(self, "Input Error", "Both ID and Name must be filled.")
+            return
+
+        # 데이터베이스에 삽입
+        try:
+            self.worker_manager.insert_category_data(id_text, name_text)
+            self.load_category_data()  # 테이블 데이터 갱신
+            self.id_input.clear()  # 입력 필드 초기화
+            self.name_input.clear()
+        except Exception as e:
+            StyledMessageBox(self, "Database Error", str(e))
+
+    def load_workers(self):
+        results = self.worker_manager.load_workers()
+        self.worker_table.setRowCount(0)
+        for row_number, row_data in enumerate(results):
+            self.worker_table.insertRow(row_number)
+            for column_number, data in enumerate(row_data):
+                self.worker_table.setItem(row_number, column_number, QTableWidgetItem(str(data)))
+
+    def update_authority(self):
+        selected_row = self.worker_table.currentRow()
+        if selected_row == -1:
+            StyledMessageBox(self, "Selection Error", "권한을 변경할 계정을 선택해주세요.")
+            return
+
+        worker_id = self.worker_table.item(selected_row, 0).text()
+        new_authority = self.authority_combo.currentIndex()
+        self.worker_manager.update_worker_authority(worker_id, new_authority)
+        StyledMessageBox(self, "Update Success", "권한이 성공적으로 변경되었습니다.")
+        self.load_workers()
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
+        self.current_user_authority = None  # 사용자 권한을 저장할 속성 추가
+        # Google Sheet 연결 정보
+        self.google_sheet_connector = GoogleSheetConnector(CREDENTIALS_FILE, SPREADSHEET_NAME)
+        # MySQL 연결 정보
+        self.mysql_connector = MySQLConnector(DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE)
+        self.worker_manager = WorkerManager(self.mysql_connector)
+        self.setup_ui()
 
+    def setup_ui(self):
         self.setWindowFlag(Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setStyleSheet("""
@@ -560,14 +615,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.ui_central_widget)
 
         self.switch_to_UI_Frame(0)
-
+        
         central_layout = QHBoxLayout(self.central_widget)
 
         # 프레임 전환 버튼 추가
         self.frame_buttons_layout = QVBoxLayout()  # 프레임 전환 버튼을 세로로 정렬하기 위해 QVBoxLayout 사용
 
         self.frame_buttons = []  # 각 프레임의 프레임 전환 버튼을 저장할 리스트
-        button_name = ["Input Data", "Delete Data", "Data", "Data"]
+        button_name = ["Input Data", "Delete Data", "Management", "Data"]
         for i in range(4):
             button = CustomButtonWithStyle(button_name[i])
             button.clicked.connect(partial(self.switch_to_frame, i))
@@ -580,80 +635,98 @@ class MainWindow(QMainWindow):
         self.stacked_widget = QStackedWidget()
         central_layout.addWidget(self.stacked_widget)
 
+        # 로그 출력 브라우저 생성
+        self.log_browser_Layout = QVBoxLayout()
+        self.log_browser = QTextBrowser()
+        self.log_browser.setFont(FontManager(font_size=10).get_font())  # 폰트 설정
+        self.log_browser.setStyleSheet("border: 2px solid white; border-radius: 8px; width: 110px;")
+        self.log_browser.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # 스크롤바 없애기
+        self.log_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # 스크롤바 없애기
+        self.log_browser_label = StyledLabel("Log")
+        self.log_browser_Layout.addWidget(self.log_browser_label)
+        self.log_browser_Layout.addWidget(self.log_browser)
+        central_layout.addLayout(self.log_browser_Layout)
+
         # 프레임 생성 및 스택 위젯에 추가
         self.frames = []
         for i in range(4):
-            frame = FrameWithBar(self)
-            frame.setFixedWidth(400)  # 프레임의 가로 크기를 30px 늘림
-            grid_layout = QGridLayout()
-            frame.content_layout.addLayout(grid_layout)
-            autocompletion_input_label = StyledLabel("Target")
-            self.autocompletion_input_field = StyledLineEdit(self, placeholderText="회사명을 입력해주세요")
-            grid_layout.addWidget(autocompletion_input_label, 0, 0)  # input label을 왼쪽에 배치
-            grid_layout.addWidget(self.autocompletion_input_field, 0, 1)  # input field를 오른쪽에 배치
+            if i == 2:
+                # WorkerFrame을 3번째 프레임으로 추가
+                self.worker_frame = WorkerFrame(self, self.worker_manager)
+                self.stacked_widget.addWidget(self.worker_frame)
+                self.frames.append(self.worker_frame)
+            else:
+                frame = FrameWithBar(self)
+                frame.setFixedWidth(400)  # 프레임의 가로 크기를 30px 늘림
+                grid_layout = QGridLayout()
+                frame.content_layout.addLayout(grid_layout)
+                autocompletion_input_label = StyledLabel("Target")
+                self.autocompletion_input_field = StyledLineEdit(self, placeholderText="회사명을 입력해주세요")
+                grid_layout.addWidget(autocompletion_input_label, 0, 0)  # input label을 왼쪽에 배치
+                grid_layout.addWidget(self.autocompletion_input_field, 0, 1)  # input field를 오른쪽에 배치
 
-            self.id_text = StyledLineEdit(self, placeholderText="작업 종류를 입력해주세요")
-            self.name_text = StyledLineEdit(self, placeholderText="작업자 이름")
-            self.longtext_text = StyledLineEdit(self)
-            self.link_text = StyledLineEdit(self)
+                self.id_text = StyledLineEdit(self, placeholderText="작업 종류를 입력해주세요")
+                self.name_text = StyledLineEdit(self, placeholderText="작업자 이름")
+                self.longtext_text = StyledLineEdit(self)
+                self.link_text = StyledLineEdit(self)
 
-            inputs = {
-                "분류": self.id_text,
-                "작업자": self.name_text,
-                "내용": self.longtext_text,
-                "Link": self.link_text
-            }
+                inputs = {
+                    "분류": self.id_text,
+                    "작업자": self.name_text,
+                    "내용": self.longtext_text,
+                    "Link": self.link_text
+                }
 
-            for g, (label_text, input_widget) in enumerate(inputs.items(), start=1):
-                label = StyledLabel(label_text)
-                input_widget.setObjectName(f"{label_text}_field")
-                grid_layout.addWidget(label, g, 0)
-                grid_layout.addWidget(input_widget, g, 1)
+                for g, (label_text, input_widget) in enumerate(inputs.items(), start=1):
+                    label = StyledLabel(label_text)
+                    input_widget.setObjectName(f"{label_text}_field")
+                    grid_layout.addWidget(label, g, 0)
+                    grid_layout.addWidget(input_widget, g, 1)
 
-            self.stacked_widget.addWidget(frame)
-            self.frames.append(frame)
+                self.stacked_widget.addWidget(frame)
+                self.frames.append(frame)
 
-            # input_label과 button_layout 사이에 수평 스페이서 추가
-            spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
-            frame.content_layout.addItem(spacer)
+                # input_label과 button_layout 사이에 수평 스페이서 추가
+                spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
+                frame.content_layout.addItem(spacer)
 
-            # 프레임에 버튼 추가
-            button_layout = QHBoxLayout()  # 버튼을 가로로 정렬하기 위해 QHBoxLayout 사용
-            frame.content_layout.addLayout(button_layout)
+                # 프레임에 버튼 추가
+                button_layout = QHBoxLayout()  # 버튼을 가로로 정렬하기 위해 QHBoxLayout 사용
+                frame.content_layout.addLayout(button_layout)
 
-            if i == 3:  # 프레임 4일 때만 버튼 2개 추가
-                for k in range(2):
-                    button = CustomButtonWithStyle(f"Button {k + 1}")
-                    button_layout.addWidget(button)
-            else:  # 나머지 프레임에는 버튼 1개 추가
-                if i == 0:
-                    button = Input_Button_Clicked(self, self.autocompletion_input_field, self.id_text, self.name_text,
-                                                  self.longtext_text, self.link_text)
-                    button.setText("Input Data")
-                    button_layout.addWidget(button)
-                else:
-                    button = CustomButtonWithStyle(f"Button 1")
-                    button_layout.addWidget(button)
+                if i == 3:  # 프레임 4일 때만 버튼 2개 추가
+                    for k in range(2):
+                        button = CustomButtonWithStyle(f"Button {k+1}")
+                        button_layout.addWidget(button)
+                else:  # 나머지 프레임에는 버튼 1개 추가
+                    if i == 0:
+                        button = InputButtonClicked(self, self.autocompletion_input_field, self.id_text, self.name_text,
+                                                    self.longtext_text, self.link_text)
+                        button.setText("Input Data")
+                        button_layout.addWidget(button)
+                    else:
+                        button = CustomButtonWithStyle(f"Button 1")
+                        button_layout.addWidget(button)
 
         # 배경색 지정
         self.central_widget.setStyleSheet("background-color: #292929; color: white;")
 
         # 현재 보이는 프레임의 버튼은 보이지만 누를 수 없도록 설정
         self.stacked_widget.currentChanged.connect(self.update_buttons_state)
-        self.update_buttons_state(self.stacked_widget.currentIndex())
 
         self.setLayout(main_layout)
-
-        # Google Sheet 연결 정보
-        self.google_sheet_connector = GoogleSheetConnector(CREDENTIALS_FILE, SPREADSHEET_NAME)
-
-        # MySQL 연결 정보
-        self.mysql_connector = MySQLConnector(DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE)
 
         # AutocompletionThread 초기화 및 시작
         self.autocompletion_thread = AutocompletionThread(self.mysql_connector)
         self.autocompletion_thread.result.connect(self.update_completer)
         self.autocompletion_thread.start()
+
+    def set_name_text(self, text):
+        # 첫 번째 프레임에서 self.name_text 찾기
+        name_text_widget = self.frames[0].findChild(StyledLineEdit, "작업자_field")
+        if name_text_widget:
+            name_text_widget.setText(text)
+            name_text_widget.setReadOnly(True)
 
     def switch_to_UI_Frame(self, index):
         # 모든 프레임을 숨깁니다.
@@ -669,8 +742,10 @@ class MainWindow(QMainWindow):
     def update_completer(self, autocompletion_data):
         input_fields = self.frames[0].findChildren(StyledLineEdit)
         for index, data in enumerate(autocompletion_data):
-            completer = QCompleter(data, self)
+            completer = StyledCompleter(data, self)
             input_field = input_fields[index]
+            if input_field == self.name_text:
+                continue  # name_text에는 자동완성 설정을 적용하지 않음
             input_field.setCompleter(completer)
 
     def switch_to_frame(self, index):
@@ -678,11 +753,17 @@ class MainWindow(QMainWindow):
             self.stacked_widget.setCurrentIndex(int(index))
 
     def update_buttons_state(self, index):
-        # 프레임 전환 버튼 비활성화
+        # 모든 버튼을 일단 활성화
         for button in self.frame_buttons:
             button.setEnabled(True)
+        
+        # 현재 인덱스의 버튼만 비활성화
         if index < len(self.frame_buttons):
             self.frame_buttons[index].setEnabled(False)
+        
+        # "Management" 버튼은 authority에 따라 항상 관리
+        if hasattr(self, 'current_user_authority'):
+            self.frame_buttons[2].setVisible(self.current_user_authority == 1)
 
     def mousePressEvent(self, event):
         self.oldPos = event.globalPos()
@@ -692,12 +773,8 @@ class MainWindow(QMainWindow):
         self.move(self.x() + delta.x(), self.y() + delta.y())
         self.oldPos = event.globalPos()
 
-
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
-
-
-
