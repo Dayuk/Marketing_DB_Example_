@@ -4,17 +4,15 @@ from oauth2client.service_account import ServiceAccountCredentials
 from settings import MAX_ROWS, MAX_COLS
 
 class GoogleSheetConnector:
-    def __init__(self, credentials_file, spreadsheet_name):
-        self.credentials_file = credentials_file
+    def __init__(self, credentials, spreadsheet_name):
+        self.credentials = credentials
         self.spreadsheet_name = spreadsheet_name
-        self.scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         self.max_rows = MAX_ROWS
         self.max_cols = MAX_COLS
         self.headers = ["id", "name", "text", "link", "datetime"]
 
     def insert_data(self, data, table_name):
-        credentials = ServiceAccountCredentials.from_json_keyfile_name(self.credentials_file, self.scope)
-        gc = gspread.authorize(credentials)
+        gc = gspread.authorize(self.credentials)  # credentials 객체를 사용하여 인증
         spreadsheet = gc.open(self.spreadsheet_name)
         sheet_name = table_name
         try:

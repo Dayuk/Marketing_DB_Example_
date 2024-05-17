@@ -1,8 +1,8 @@
 
-from PyQt5.QtWidgets import QPushButton, QLineEdit, QLabel, QTableWidget, QComboBox, QTableWidgetItem, QMessageBox, QCompleter
+from PyQt5.QtWidgets import QPushButton, QLineEdit, QLabel, QTableWidget, QComboBox, QTableWidgetItem, QMessageBox, QCompleter, QTabWidget
 from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtWidgets import QApplication
-from PyQt5.QtCore import QStringListModel
+from PyQt5.QtCore import QStringListModel, Qt
 from settings import FONT_PATH
 
 class FontManager:
@@ -127,6 +127,13 @@ class StyledTableWidget(QTableWidget):
         self.setFont(font_manager.get_font())
 
         self.horizontalHeader().setFont(font_manager.get_font())  # 수평 헤더에 폰트 설정
+        self.verticalHeader().setFont(font_manager.get_font())  # 수직 헤더에 폰트 적용
+        font_size = font_manager.get_font().pointSize()
+        header_height = font_size + 20  # 폰트 크기에 따라 헤더 높이 조정
+        self.horizontalHeader().setFixedHeight(header_height)  # 수평 헤더의 높이 설정
+
+        # 가로 스크롤바 비활성화
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         # 스타일 설정
         self.setStyleSheet("""
@@ -169,6 +176,10 @@ class StyledTableWidget(QTableWidget):
                     new_item = QTableWidgetItem("Example Text")
                     new_item.setFont(font_manager.get_font())
                     self.setItem(row, col, new_item)
+
+        # 열 너비 자동 조정
+        self.resizeColumnsToContents()
+        self.horizontalHeader().setStretchLastSection(True)
 
 class StyledComboBox(QComboBox):
     def __init__(self, parent=None):
@@ -254,4 +265,36 @@ class StyledCompleter(QCompleter):
                 background-color: white;
                 color: #292929;
             }
+        """)
+
+class StyledTabWidget(QTabWidget):
+    def __init__(self, parent=None):
+        super(StyledTabWidget, self).__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        font_manager = FontManager(font_size=11)
+        self.setFont(font_manager.get_font())
+        # 스타일 시트 설정
+        font_size = font_manager.get_font().pointSize()
+        tab_height = font_size + 4
+
+        self.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: 1px solid #292929;
+                background: #292929;
+            }}
+            QTabBar::tab {{
+                background: #292929;
+                color: #ffffff;
+                padding: 10px;
+                border: 1px solid #fff;
+                border-radius: 4px;
+                height: {tab_height}px;
+            }}
+            QTabBar::tab:selected, QTabBar::tab:hover {{
+                background: #ffffff;
+                color: #292929;
+                border-color: #292929;
+            }}
         """)
