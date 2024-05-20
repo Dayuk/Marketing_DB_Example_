@@ -1,5 +1,5 @@
 
-from PyQt5.QtWidgets import QPushButton, QLineEdit, QLabel, QTableWidget, QComboBox, QTableWidgetItem, QMessageBox, QCompleter, QTabWidget
+from PyQt5.QtWidgets import QPushButton, QLineEdit, QLabel, QTableWidget, QComboBox, QTableWidgetItem, QMessageBox, QCompleter, QTabWidget, QDateEdit
 from PyQt5.QtGui import QFont, QFontDatabase
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QStringListModel, Qt
@@ -297,4 +297,66 @@ class StyledTabWidget(QTabWidget):
                 color: #292929;
                 border-color: #292929;
             }}
+        """)
+
+class StyledDateEdit(QDateEdit):
+    def __init__(self, parent=None):
+        super(StyledDateEdit, self).__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        # 폰트 설정
+        font_manager = FontManager(font_size=10)
+        self.setFont(font_manager.get_font())
+
+        # 캘린더 위젯 생성 및 설정
+        self.setCalendarPopup(True)  # 캘린더 팝업 활성화
+        calendar = self.calendarWidget()  # 캘린더 위젯 가져오기
+        if calendar:  # 캘린더 위젯이 존재하는지 확인
+            calendar.setFont(font_manager.get_font())  # 캘린더 위젯에 폰트 설정
+            # 캘린더 스타일 설정
+            calendar.setStyleSheet("""
+                QCalendarWidget QToolButton {
+                    color: white;
+                    background-color: #292929;
+                    border-radius: 4px;
+                }
+                QCalendarWidget QMenu {
+                    background-color: #292929;
+                    color: white;
+                }
+                QCalendarWidget QWidget {
+                    alternate-background-color: #292929;
+                }
+                QCalendarWidget QAbstractItemView:enabled {
+                    color: white;
+                    background-color: #292929;
+                    selection-background-color: #555555;
+                    selection-color: white;
+                }
+                QCalendarWidget QAbstractItemView:disabled {
+                    color: #808080;
+                    background-color: #292929;
+                }
+            """)
+
+        # 스타일 시트 설정
+        self.setStyleSheet("""
+            QDateEdit {
+                background-color: #292929;
+                color: white;
+                border: 2px solid white;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QDateEdit::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 15px;
+                border-left-width: 1px;
+                border-left-color: white;
+                border-left-style: solid;
+                border-top-right-radius: 3px;
+                border-bottom-right-radius: 3px;
+            }
         """)

@@ -1,5 +1,6 @@
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QGridLayout, QStackedWidget, QMainWindow, QSpacerItem, QSizePolicy, QTextBrowser, QTableWidgetItem
-from PyQt5.QtCore import Qt, QPoint, QThread, pyqtSignal
+from doctest import FAIL_FAST
+from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QFrame, QGridLayout, QStackedWidget, QMainWindow, QSpacerItem, QSizePolicy, QTextBrowser, QTableWidgetItem, QDateEdit
+from PyQt5.QtCore import Qt, QPoint, QThread, pyqtSignal, QDateTime
 import sys
 from uu import Error
 import mysql.connector
@@ -11,8 +12,9 @@ import re
 #.py file import
 from settings import CREDENTIALS_FILE, SPREADSHEET_NAME, DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE
 from sheets_connector import GoogleSheetConnector
-from ui_components import FontManager, CustomButtonWithStyle, StyledLineEdit, StyledLabel, StyledTableWidget, StyledComboBox, StyledMessageBox, StyledCompleter, StyledTabWidget
+from ui_components import FontManager, CustomButtonWithStyle, StyledLineEdit, StyledLabel, StyledTableWidget, StyledComboBox, StyledMessageBox, StyledCompleter, StyledTabWidget, StyledDateEdit
 from database_manager import MySQLConnector
+from ppt_generator import create_ppt
 
 class InputButtonClicked(CustomButtonWithStyle):
     def __init__(self, main_window, autocompletion_input_field, id_text_field, name_text_field, longtext_text_field, link_text_field, parent=None):
@@ -81,6 +83,10 @@ class Worker(QThread):
         # 데이터베이스 연결 및 테이블 존재 확인
         self.main_window.mysql_connector.connect()
         try:
+            if self.table_name in ["분류", "작업자"]:
+                self.result_signal.emit("회사명 Not Found: 타겟이 존재하지 않습니다.")
+                return
+
             query = "SHOW TABLES LIKE %s"
             result = self.main_window.mysql_connector.execute_query(query, (self.table_name,))
             table_exists = bool(result)
@@ -208,7 +214,8 @@ class AutocompletionThread(QThread):
 
                 table_names = cursor.fetchall()
 
-                table_names = [name[0] for name in table_names]
+                # '분류'와 '작업자' 테이블 이름 제외
+                table_names = [name[0] for name in table_names if name[0] not in ('분류', '작업자')]
 
                 cursor.execute("SELECT DISTINCT name FROM 분류")
                 id_values = cursor.fetchall()
@@ -263,6 +270,10 @@ class FrameWithBar(QFrame):
 
         self.setStyleSheet(CustomButtonWithStyle.get_style())
 
+        # 세로 크기 정책 설정
+        sizePolicy = QSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.setSizePolicy(sizePolicy)
+
 class LoginFrame(QFrame):
     def __init__(self, main_window, parent=None):
         super(LoginFrame, self).__init__(parent)
@@ -274,7 +285,7 @@ class LoginFrame(QFrame):
         main_layout = QVBoxLayout(self)
 
         # FrameWithBar 추가
-        frame_with_bar = FrameWithBar(self)
+        frame_with_bar = FrameWithBar(self.main_window)
         main_layout.addWidget(frame_with_bar)
 
         # 로그인 폼을 위한 그리드 레이아웃
@@ -366,7 +377,7 @@ class RegisterFrame(QFrame):
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        frame_with_bar = FrameWithBar(self)
+        frame_with_bar = FrameWithBar(self.main_window)
         layout.addWidget(frame_with_bar)
 
         grid_layout = QGridLayout()
@@ -414,6 +425,11 @@ class RegisterFrame(QFrame):
             StyledMessageBox(self, "계정 생성 실패", "모든 정보를 입력해주세요.")
             return
 
+        # 사용자 ID 길이 검증
+        if len(user_id) > 20:
+            StyledMessageBox(self, "계정 생성 실패", "ID는 20자 이하로 입력해주세요.")
+            return
+
         # 이름 길이 제한 및 한국어 여부 확인
         if len(name) > 5:
             StyledMessageBox(self, "계정 생성 실패", "이름은 5자 이내로 입력해주세요.")
@@ -455,15 +471,15 @@ class RegisterFrame(QFrame):
         self.findChild(StyledLineEdit, "PW_field").clear()
 
 class WorkerFrame(QFrame):
-    def __init__(self, parent, worker_manager):
-        super(WorkerFrame, self).__init__(parent)
+    def __init__(self, main_window, worker_manager):
+        super(WorkerFrame, self).__init__(main_window)  # main_window를 부모로 설정
+        self.main_window = main_window  # main_window 참조를 내부 속성으로 저장
         self.worker_manager = worker_manager
-        self.font_manager = FontManager(font_size=10)
         self.setup_ui()
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
-        frame_with_bar = FrameWithBar(self)
+        frame_with_bar = FrameWithBar(self.main_window)
         layout.addWidget(frame_with_bar)
         self.tab_widget = StyledTabWidget()  # 탭 위젯 생성
         layout.addWidget(self.tab_widget)
@@ -565,6 +581,195 @@ class WorkerFrame(QFrame):
         StyledMessageBox(self, "Update Success", "권한이 성공적으로 변경되었습니다.")
         self.load_workers()
 
+class TableViewFrame(QFrame):
+    def __init__(self, main_window, mysql_connector):
+        super(TableViewFrame, self).__init__(main_window)
+        self.main_window = main_window  # main_window 참조를 내부 속성으로 저장
+        self.mysql_connector = mysql_connector
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        frame_with_bar = FrameWithBar(self.main_window)
+        layout.addWidget(frame_with_bar)
+        self.table_widget = StyledTableWidget()
+        self.table_widget.setColumnCount(2)
+        self.table_widget.setHorizontalHeaderLabels(["회사명", "분류"])
+        layout.addWidget(self.table_widget)
+        self.load_data()
+
+    def load_data(self):
+        self.mysql_connector.connect()
+        cursor = self.mysql_connector.connection.cursor()
+        try:
+            # 모든 테이블 이름 가져오기
+            cursor.execute("SHOW TABLES FROM my_database")
+            tables = cursor.fetchall()
+
+            # 분류 테이블의 name 컬럼 가져오기
+            cursor.execute("SELECT name FROM 분류")
+            categories = cursor.fetchall()
+
+            # 필터링: '분류'와 '작업자' 테이블 이름 제외
+            filtered_tables = [table for table in tables if table[0] not in ('분류', '작업자')]
+
+            self.table_widget.setRowCount(max(len(filtered_tables), len(categories)))
+
+            for i, table in enumerate(filtered_tables):
+                self.table_widget.setItem(i, 0, QTableWidgetItem(table[0]))
+
+            for i, category in enumerate(categories):
+                self.table_widget.setItem(i, 1, QTableWidgetItem(category[0]))
+
+        except mysql.connector.Error as e:
+            StyledMessageBox(self, "데이터 로드 실패", str(e))
+        finally:
+            cursor.close()
+            self.mysql_connector.disconnect()
+
+class ExportPPTFrame(QFrame):
+    def __init__(self, main_window):
+        super(ExportPPTFrame, self).__init__(main_window)  # main_window를 부모로 설정
+        self.main_window = main_window  # main_window 참조를 내부 속성으로 저장
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QGridLayout(self)
+        frame_with_bar = FrameWithBar(self.main_window)
+        frame_with_bar.setFixedHeight(55)
+        layout.addWidget(frame_with_bar, 0, 1, 1, 3)  # 첫 번째 행에 프레임 추가
+
+        # 회사명 레이블과 입력 필드
+        layout.addWidget(StyledLabel("회사명:"), 1, 0)  # 레이블 위치 설정
+        self.company_name_input = StyledLineEdit(self, placeholderText="회사명을 입력해주세요")
+        layout.addWidget(self.company_name_input, 1, 1)  # 입력 필드 위치 설정
+
+        # 확인 버튼 추가
+        self.confirm_button = CustomButtonWithStyle("확인")
+        self.confirm_button.clicked.connect(self.confirm_company_name)
+        layout.addWidget(self.confirm_button, 1, 2)  # 버튼 위치 설정
+
+        # 시작 날짜 선택
+        self.start_date_edit = StyledDateEdit(self)
+        self.start_date_edit.setCalendarPopup(True)
+        self.start_date_edit.setDateTime(QDateTime.currentDateTime())
+        layout.addWidget(StyledLabel("시작 날짜:"), 2, 0)
+        layout.addWidget(self.start_date_edit, 2, 1)
+
+        # 종료 날짜 선택
+        self.end_date_edit = StyledDateEdit(self)
+        self.end_date_edit.setCalendarPopup(True)
+        self.end_date_edit.setDateTime(QDateTime.currentDateTime())
+        layout.addWidget(StyledLabel("종료 날짜:"), 3, 0)
+        layout.addWidget(self.end_date_edit, 3, 1)
+
+        # Export 버튼
+        export_button = CustomButtonWithStyle("Export PPT")
+        export_button.clicked.connect(self.export_ppt)
+        layout.addWidget(export_button, 4, 0, 1, 3)  # Export 버튼을 세 열에 걸쳐 추가
+
+    def confirm_company_name(self):
+        self.company_name_input.setEnabled(False)
+        self.confirm_button.setEnabled(False)
+        company_name = self.company_name_input.text().strip()
+        if not company_name:
+            self.main_window.log_browser.append("입력 오류 회사명을 입력해주세요.")
+            self.company_name_input.setEnabled(True)
+            self.confirm_button.setEnabled(True)
+            return
+
+        self.main_window.mysql_connector.connect()
+        try:
+            query = "SELECT MIN(datetime), MAX(datetime) FROM `{}`".format(company_name)
+            cursor = self.main_window.mysql_connector.connection.cursor()
+            cursor.execute(query)
+            result = cursor.fetchone()
+            if result and result[0] and result[1]:
+                min_date, max_date = result
+                self.start_date_edit.setMinimumDate(min_date.date())
+                self.start_date_edit.setMaximumDate(max_date.date())
+                self.start_date_edit.setDate(min_date.date())
+                self.end_date_edit.setMinimumDate(min_date.date())
+                self.end_date_edit.setMaximumDate(max_date.date())
+                self.end_date_edit.setDate(max_date.date())
+                self.main_window.log_browser.append("시작 및 종료 날짜가 설정되었습니다.\nstart date: " + min_date.date().strftime('%Y-%m-%d') + "\nend date: " + max_date.date().strftime('%Y-%m-%d'))
+        except mysql.connector.Error:
+            self.main_window.log_browser.append("데이터가 올바르지 않거나 데이터베이스의 연결이 원활하지 않습니다.")
+            self.company_name_input.setEnabled(True)
+            self.confirm_button.setEnabled(True)
+        finally:
+            self.main_window.mysql_connector.disconnect()
+
+    def export_ppt(self):
+        company_name = self.company_name_input.text()
+        start_date = self.start_date_edit.date()
+        end_date = self.end_date_edit.date()
+        
+        if start_date > end_date:
+            self.main_window.log_browser.append("날짜 오류: 시작 날짜가 종료 날짜보다 늦을 수 없습니다.")
+            self.company_name_input.setEnabled(True)
+            self.confirm_button.setEnabled(True)
+            return
+        
+        company_name = self.company_name_input.text().strip()
+        if not company_name:
+            self.main_window.log_browser.append("입력 오류: 회사명을 입력해주세요.")
+            self.company_name_input.setEnabled(True)
+            self.confirm_button.setEnabled(True)
+            return
+        
+        try:
+            if start_date > end_date:
+                self.main_window.log_browser.append("날짜 오류: 시작 날짜가 종료 날짜보다 늦을 수 없습니다.")
+                return
+            
+            if not company_name:
+                self.main_window.log_browser.append("입력 오류: 회사명을 입력해주세요.")
+                return
+        
+            # QDate 객체를 문자열로 변환
+            start_date_str = start_date.toString('yyyy-MM-dd')
+            end_date_str = end_date.toString('yyyy-MM-dd')
+
+            # 데이터베이스에서 데이터 가져오기
+            data = self.fetch_data(company_name, start_date, end_date)
+            
+            # PPT 생성
+            ppt_file = create_ppt(company_name, data, start_date_str, end_date_str)
+            self.main_window.log_browser.append(f"PPT가 생성되었습니다: {ppt_file}")
+            pass
+        finally:
+            self.company_name_input.setEnabled(True)
+            self.confirm_button.setEnabled(True)
+            self.company_name_input.clear()
+            self.start_date_edit.clear()
+            self.end_date_edit.clear()
+
+    def fetch_data(self, company_name, start_date, end_date):
+        # QDate 객체를 'YYYY-MM-DD' 형식의 문자열로 변환
+        start_date_str = start_date.toString('yyyy-MM-dd')
+        end_date_str = end_date.toString('yyyy-MM-dd')
+
+        query = f"""
+                SELECT id, name, text, link, datetime
+                FROM `{company_name}`
+                WHERE datetime BETWEEN '{start_date_str}' AND '{end_date_str}'
+                """
+        try:
+            self.main_window.mysql_connector.connect()
+            cursor = self.main_window.mysql_connector.connection.cursor()
+            cursor.execute(query)
+            data = cursor.fetchall()
+            return data
+        except mysql.connector.Error as e:
+            print(e)
+            self.main_window.log_browser.append(f"데이터베이스 오류: {str(e)}")
+            return []
+        finally:
+            cursor.close()
+            self.main_window.mysql_connector.disconnect()
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super(MainWindow, self).__init__()
@@ -615,7 +820,7 @@ class MainWindow(QMainWindow):
         self.frame_buttons_layout = QVBoxLayout()  # 프레임 전환 버튼을 세로로 정렬하기 위해 QVBoxLayout 사용
 
         self.frame_buttons = []  # 각 프레임의 프레임 전환 버튼을 저장할 리스트
-        button_name = ["Input Data", "Delete Data", "Management", "Export PPT"]
+        button_name = ["Input Data", "Table Viewer", "Management", "Export PPT"]
         for i in range(4):
             button = CustomButtonWithStyle(button_name[i])
             button.clicked.connect(partial(self.switch_to_frame, i))
@@ -643,14 +848,22 @@ class MainWindow(QMainWindow):
         # 프레임 생성 및 스택 위젯에 추가
         self.frames = []
         for i in range(4):
-            if i == 2:
+            if i == 1:
+                # TableViewFrame을 2번째 프레임으로 추가
+                self.table_view_frame = TableViewFrame(self, self.mysql_connector)
+                self.stacked_widget.addWidget(self.table_view_frame)
+                self.frames.append(self.table_view_frame)
+            elif i == 2:
                 # WorkerFrame을 3번째 프레임으로 추가
                 self.worker_frame = WorkerFrame(self, self.worker_manager)
                 self.stacked_widget.addWidget(self.worker_frame)
                 self.frames.append(self.worker_frame)
+            elif i == 3:
+                self.export_ppt_frame = ExportPPTFrame(self)
+                self.stacked_widget.addWidget(self.export_ppt_frame)
+                self.frames.append(self.export_ppt_frame)
             else:
                 frame = FrameWithBar(self)
-                frame.setFixedWidth(400)  # 프레임의 가로 크기를 30px 늘림
                 grid_layout = QGridLayout()
                 frame.content_layout.addLayout(grid_layout)
                 autocompletion_input_label = StyledLabel("회사명")
@@ -687,19 +900,14 @@ class MainWindow(QMainWindow):
                 button_layout = QHBoxLayout()  # 버튼을 가로로 정렬하기 위해 QHBoxLayout 사용
                 frame.content_layout.addLayout(button_layout)
 
-                if i == 3:  # 프레임 4일 때만 버튼 2개 추가
-                    for k in range(2):
-                        button = CustomButtonWithStyle(f"Button {k+1}")
-                        button_layout.addWidget(button)
-                else:  # 나머지 프레임에는 버튼 1개 추가
-                    if i == 0:
-                        button = InputButtonClicked(self, self.autocompletion_input_field, self.id_text, self.name_text,
-                                                    self.longtext_text, self.link_text)
-                        button.setText("Input Data")
-                        button_layout.addWidget(button)
-                    else:
-                        button = CustomButtonWithStyle(f"Button 1")
-                        button_layout.addWidget(button)
+                if i == 0:
+                    button = InputButtonClicked(self, self.autocompletion_input_field, self.id_text, self.name_text,
+                                                self.longtext_text, self.link_text)
+                    button.setText("Input Data")
+                    button_layout.addWidget(button)
+                else:
+                    button = CustomButtonWithStyle(f"Button 1")
+                    button_layout.addWidget(button)
 
         # 배경색 지정
         self.central_widget.setStyleSheet("background-color: #292929; color: white;")
@@ -731,6 +939,8 @@ class MainWindow(QMainWindow):
         frame_to_show.show()
 
     def update_completer(self, autocompletion_data):
+        completer = StyledCompleter(autocompletion_data[0], self)
+        self.export_ppt_frame.company_name_input.setCompleter(completer)
         input_fields = self.frames[0].findChildren(StyledLineEdit)
         for index, data in enumerate(autocompletion_data):
             completer = StyledCompleter(data, self)
