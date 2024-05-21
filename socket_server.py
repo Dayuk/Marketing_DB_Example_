@@ -1,11 +1,16 @@
 import socket
-import os
-import json
 import logging
+import os
 from cryptography.fernet import Fernet
 
 # 로깅 설정
-logging.basicConfig(filename='server_connections.log', level=logging.INFO, format='%(asctime)s:%(levelname)s:%(message)s')
+log_directory = "C:\\Users\\Administrater\\PycharmProjects\\pythonProject\\server\\"  # 안전한 로그 디렉토리 경로 설정
+if not os.path.exists(log_directory):
+    os.makedirs(log_directory)
+
+log_file_path = os.path.join(log_directory, 'server_connections.log')
+logging.basicConfig(filename=log_file_path, level=logging.INFO, 
+                    format='%(asctime)s:%(levelname)s:%(message)s [%(filename)s:%(lineno)d]')
 
 # 암호화 키 생성
 key = Fernet.generate_key()
@@ -51,4 +56,5 @@ def send_credentials_data():
     finally:
         server_socket.close()
 
+send_credentials_data()
 send_credentials_data()

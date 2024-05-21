@@ -59,7 +59,6 @@ class InputButtonClicked(CustomButtonWithStyle):
         if self.thread.isRunning():
             self.thread.wait()  # 스레드가 완전히 종료될 때까지 기다림
         self.thread.deleteLater()  # 스레드 객체 삭제
-        self.main_window.log_browser.append("작업이 완료되었습니다.")
 
 class Worker(QThread):
     finished = pyqtSignal()  # 작업 완료 시그널
@@ -152,6 +151,7 @@ class Worker(QThread):
             """
             data = (self.id_text, self.name_text_field.text(), self.longtext_text_field.text(), self.link_text_field.text(), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             self.main_window.mysql_connector.execute_query(query, data)
+            self.result_signal.emit("작업이 완료되었습니다.")
         finally:
             # 데이터베이스 연결 닫기
             self.main_window.mysql_connector.disconnect()
@@ -444,7 +444,7 @@ class RegisterFrame(QFrame):
 
         # 비밀번호를 바이트로 인코딩하고 bcrypt로 해싱
         password_bytes = password.encode('utf-8')
-        hashed_password = bcrypt.hashpw(password_bytes, bcrypt.gensalt())
+        hashed_password = bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode('utf-8')  # 해싱 결과를 문자열로 변환
 
         # MySQL 데이터베이스 연결
         self.main_window.mysql_connector.connect()
@@ -504,10 +504,15 @@ class WorkerFrame(QFrame):
         update_button = CustomButtonWithStyle("권한 업데이트")
         update_button.clicked.connect(self.update_authority)
 
+        # Table Reload 버튼 추가
+        reload_button = CustomButtonWithStyle("Reload")
+        reload_button.clicked.connect(self.load_workers)  # load_workers 메소드를 호출하여 테이블을 다시 로드
+
         update_layout = QHBoxLayout()
         update_layout.addWidget(StyledLabel("설정 권한:"))
         update_layout.addWidget(self.authority_combo)
         update_layout.addWidget(update_button)
+        update_layout.addWidget(reload_button)  # 업데이트 레이아웃에 reload 버튼 추가
         layout.addLayout(update_layout)
 
         self.load_workers()
