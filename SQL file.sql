@@ -16,6 +16,34 @@
 /*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
 --
+-- Table structure for table `target_ranking`
+--
+
+DROP TABLE IF EXISTS `target_ranking`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `target_ranking` (
+  `index` int NOT NULL AUTO_INCREMENT,
+  `target_name` text NOT NULL,
+  `keyword` text NOT NULL,
+  `platform` text NOT NULL,
+  `target_ranking` int NOT NULL,
+  `datetime` datetime NOT NULL,
+  PRIMARY KEY (`index`)
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb3;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `target_ranking`
+--
+
+LOCK TABLES `target_ranking` WRITE;
+/*!40000 ALTER TABLE `target_ranking` DISABLE KEYS */;
+INSERT INTO `target_ranking` VALUES (1,'성심당','대전 맛집','Naver Search',999,'2024-05-22 22:55:48'),(2,'성심당','대전 맛집','Naver Search',999,'2024-05-22 22:57:33'),(3,'강서면옥','오산 맛집','Naver Search',999,'2024-05-22 22:58:39'),(4,'성심당','대전 맛집','Naver Search',999,'2024-05-22 23:08:07'),(5,'강서면옥','오산 맛집','Naver Search',999,'2024-05-22 23:09:14');
+/*!40000 ALTER TABLE `target_ranking` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
 -- Table structure for table `강서면옥`
 --
 
@@ -623,4 +651,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2024-05-21 20:39:34
+-- Dump completed on 2024-05-22 23:34:14
